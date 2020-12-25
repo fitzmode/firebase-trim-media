@@ -96,9 +96,12 @@ exports.trimMedia = functions.firestore
       );
       const urls = await Promise.all(urlPromises);
 
+      // urls is nested Arrays, flatten them
+      const merged = [].concat.apply([], urls);
       // Update db
+
       await db.collection("media").doc(mediaId).update({
-        frame_urls: urls.flat(),
+        frame_urls: merged,
       });
 
       // Delete tmpfiles
