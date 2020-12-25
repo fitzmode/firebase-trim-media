@@ -1,0 +1,2 @@
+HEAD  https://google.com
+Authorization: Basic username:password
