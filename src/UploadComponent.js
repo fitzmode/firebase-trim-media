@@ -14,6 +14,7 @@ function UploadComponent() {
 
       // Process File
       const file = e.target.files[0];
+      if(!file) return console.log('No file selected')
       const ref = firebase.storage().ref("/processing");
       const fileRef = ref.child(file.name);
       const upload = await fileRef.put(file, {
