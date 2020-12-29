@@ -10,7 +10,7 @@ const { ALLOWED_EXTENAMES } = require("./consts");
 const { spawn } = require("child_process");
 const tmpDir = os.tmpdir();
 const serviceAccount = require("./service-account.json");
-const { onRequest } = require("firebase-functions/lib/providers/https");
+const { nanoid } = require('nanoid')
 
 const config = JSON.parse(process.env.FIREBASE_CONFIG);
 config.credential = admin.credential.cert(serviceAccount);
@@ -54,7 +54,7 @@ exports.trimMedia = functions
       await fs.ensureDir(workingdir);
 
       let command = `-i ${url} `;
-      const name = path.parse(url).name;
+      const name = nanoid();
       const ext = path.parse(url).ext;
       for (let i = 0; i < frames.length; i++) {
         const { from, to } = frames[i];
@@ -146,7 +146,118 @@ exports.handleFileUpload = functions.storage
 
 
 
-  exports.trimAndJoinMedia = functions
+
+
+
+// Trims and merges, keeping both.
+  exports.trimAndKeepBothTrimmedAndMergedMedia = functions
+  .firestore
+  .document("media/{mediaId}")
+  .onUpdate(async (change, context) => {
+    try {
+      const { mediaId } = context.params;
+      const db = admin.firestore();
+      const { url, frames, frame_urls } = change.after.data();
+
+      //Safety check for allowed file types
+
+      if (!ALLOWED_EXTENAMES.includes(path.extname(url)))
+        throw new Error("File type not permitted");
+
+      // Temporary early return to prevent update loop when frame_urls are updated, depends on database structure.
+      if (frame_urls) return false;
+      if (!url) throw new Error("No url provided for media");
+      if (!frames || !Array.isArray(frames))
+        throw new Error("No frames values provided for media");
+
+      // Create folder in tmp based on unique mediaId
+      const workingdir = path.join(tmpDir, mediaId);
+      await fs.ensureDir(workingdir);
+
+      let split_command = `-i ${url} `;
+      let concat_command = `-i concat:`;
+      const name = nanoid();
+      const ext = path.parse(url).ext;
+      for (let i = 0; i < frames.length; i++) {
+        const { from, to } = frames[i];
+
+        if (typeof from !== "number" || typeof to !== "number")
+          throw new Error("Provided values should be of type number");
+        // Make sure min comes first;
+        const min = Math.min(from, to);
+        const max = Math.max(from, to);
+        split_command += ` -ss ${min} -c copy -t ${
+          max - min
+        } ${workingdir}/${name}_${i}${ext}`;
+
+        concat_command += `${workingdir}/${name}_${i}${ext}${i === frames.length - 1 ? '' :'|'}`
+      }
+
+      // Split media with FFMPEG
+      await pspawn(`${split_command} -y`.split(" ").filter(Boolean));
+
+
+      // Concat media with FFMPEG
+      await pspawn(`${concat_command} -y ${workingdir}/concat_${name}${ext}`.split(" ").filter(Boolean))
+
+      // Upload
+      const upload = await storage
+          .bucket(config.storageBucket)
+          .upload(`${workingdir}/concat_${name}${ext}`, {
+            //Maybe store by userId ==> media/{uid}/file to prevent name conflict between users
+            destination: path.join("media", `concat_${name}${ext}`),
+          });
+
+  
+
+      // Upload
+      const uploadPromises = frames.map(async (frame, idx) => {
+        return await storage
+          .bucket(config.storageBucket)
+          .upload(`${workingdir}/${name}_${idx}${ext}`, {
+            //Maybe store by userId ==> media/{uid}/file to prevent name conflict between users
+            destination: path.join("media", `${name}_${idx}${ext}`),
+          });
+      });
+
+      const uploads = await Promise.all(uploadPromises);
+
+      const urlPromises = uploads.map(
+        async (upload) =>
+          await upload[0].getSignedUrl({
+            expires: "03-03-2041",
+            action: "read",
+          })
+      );
+
+      const [merged_url] = await upload[0].getSignedUrl({
+        expires: "03-03-2041",
+        action: "read",
+      })
+      const urls = await Promise.all(urlPromises);
+
+      // urls is nested Arrays, flatten them
+      const merged = [].concat.apply([], urls);
+      // Update db
+
+      await db.collection("media").doc(mediaId).update({
+        frame_urls: merged,
+        merged_url,
+      });
+
+      // Delete tmpfiles
+      return await fs.remove(workingdir);
+    } catch (error) {
+      console.error(error);
+      return false;
+    }
+  });
+
+
+
+
+  //Keeps only the merged media.
+  exports.trimAndKeepMergedOnly = functions
   .firestore
   .document("media/{mediaId}")
   .onUpdate(async (change, context) => {
@@ -174,7 +285,8 @@ exports.handleFileUpload = functions.storage
 
       let split_command = `-i ${url} `;
       let concat_command = `-i concat:`;
-      const {name, ext} = path.parse(url);
+      const { ext} = path.parse(url);
+      const name = nanoid();
 
       for (let i = 0; i < frames.length; i++) {
         const { from, to } = frames[i];

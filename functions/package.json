@@ -20,7 +20,8 @@
     "firebase-functions": "^3.6.1",
     "fluent-ffmpeg": "^2.1.2",
     "fs-extra": "^9.0.1",
-    "hhmmss": "^1.0.0"
+    "hhmmss": "^1.0.0",
+    "nanoid": "^3.1.20"
   },
   "devDependencies": {
     "eslint": "^5.12.0",
