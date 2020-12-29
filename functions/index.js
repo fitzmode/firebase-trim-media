@@ -10,7 +10,6 @@ const { ALLOWED_EXTENAMES } = require("./consts");
 const { spawn } = require("child_process");
 const tmpDir = os.tmpdir();
 const serviceAccount = require("./service-account.json");
-const { nanoid } = require('nanoid')
 
 const config = JSON.parse(process.env.FIREBASE_CONFIG);
 config.credential = admin.credential.cert(serviceAccount);
@@ -28,6 +27,42 @@ function pspawn(args) {
     });
   });
 }
+
+
+
+// Will update doc and trigger file trimming.
+exports.handleFileUpload = functions.storage
+  .object()
+  .onFinalize(async ({ bucket, name, metadata, mediaLink }, context) => {
+    try {
+      const directory = path.dirname(name);
+      // Skip unrelated uploads
+      if (directory !== "processing") return;
+
+      const db = admin.firestore();
+      if (!metadata.mediaId) throw new Error("Missing mediaId");
+
+      await storage.bucket(bucket).file(name).makePublic();
+      const url = `https://storage.googleapis.com/${bucket}/${name}`;
+
+      // Probably best way to get public url but requires setting up IAM priviledges
+      const [signed_url] = await storage
+        .bucket(bucket)
+        .file(name)
+        .getSignedUrl({
+          expires: "03-09-2491",
+          action: "read",
+        });
+
+      db.collection("media").doc(metadata.mediaId).update({
+        url,
+        signed_url,
+      });
+    } catch (error) {
+      console.log(error);
+    }
+  });
+
 
 exports.trimMedia = functions
   .firestore
@@ -54,8 +89,7 @@ exports.trimMedia = functions
       await fs.ensureDir(workingdir);
 
       let command = `-i ${url} `;
-      const name = nanoid();
-      const ext = path.parse(url).ext;
+      const { name, ext} = path.parse(url);
       for (let i = 0; i < frames.length; i++) {
         const { from, to } = frames[i];
 
@@ -110,38 +144,6 @@ exports.trimMedia = functions
     }
   });
 
-// Will update doc and trigger file trimming.
-exports.handleFileUpload = functions.storage
-  .object()
-  .onFinalize(async ({ bucket, name, metadata, mediaLink }, context) => {
-    try {
-      const directory = path.dirname(name);
-      // Skip unrelated uploads
-      if (directory !== "processing") return;
-
-      const db = admin.firestore();
-      if (!metadata.mediaId) throw new Error("Missing mediaId");
-
-      await storage.bucket(bucket).file(name).makePublic();
-      const url = `https://storage.googleapis.com/${bucket}/${name}`;
-
-      // Probably best way to get public url but requires setting up IAM priviledges
-      const [signed_url] = await storage
-        .bucket(bucket)
-        .file(name)
-        .getSignedUrl({
-          expires: "03-09-2491",
-          action: "read",
-        });
-
-      db.collection("media").doc(metadata.mediaId).update({
-        url,
-        signed_url,
-      });
-    } catch (error) {
-      console.log(error);
-    }
-  });
 
 
 
@@ -176,8 +178,7 @@ exports.handleFileUpload = functions.storage
 
       let split_command = `-i ${url} `;
       let concat_command = `-i concat:`;
-      const name = nanoid();
-      const ext = path.parse(url).ext;
+      const { name, ext} = path.parse(url);
       for (let i = 0; i < frames.length; i++) {
         const { from, to } = frames[i];
 
@@ -285,8 +286,7 @@ exports.handleFileUpload = functions.storage
 
       let split_command = `-i ${url} `;
       let concat_command = `-i concat:`;
-      const { ext} = path.parse(url);
-      const name = nanoid();
+      const { name,ext} = path.parse(url);
 
       for (let i = 0; i < frames.length; i++) {
         const { from, to } = frames[i];
@@ -308,7 +308,7 @@ exports.handleFileUpload = functions.storage
       await pspawn(`${split_command} -y`.split(" ").filter(Boolean));
 
       // Concat media with FFMPEG
-      await pspawn(`${concat_command} -y ${workingdir}/concat_${name}${ext}`.split(" ").filter(Boolean))
+      await pspawn(`${concat_command} -c copy -y ${workingdir}/concat_${name}${ext}`.split(" ").filter(Boolean))
 
       // Upload
       const upload = await storage
@@ -333,39 +333,6 @@ exports.handleFileUpload = functions.storage
     } catch (error) {
       console.error(error);
       return false;
-    }
-  });
-
-// Will update doc and trigger file trimming.
-exports.handleFileUpload = functions.storage
-  .object()
-  .onFinalize(async ({ bucket, name, metadata, mediaLink }, context) => {
-    try {
-      const directory = path.dirname(name);
-      // Skip unrelated uploads
-      if (directory !== "processing") return;
-
-      const db = admin.firestore();
-      if (!metadata.mediaId) throw new Error("Missing mediaId");
-
-      await storage.bucket(bucket).file(name).makePublic();
-      const url = `https://storage.googleapis.com/${bucket}/${name}`;
-
-      // Probably best way to get public url but requires setting up IAM priviledges
-      const [signed_url] = await storage
-        .bucket(bucket)
-        .file(name)
-        .getSignedUrl({
-          expires: "03-09-2491",
-          action: "read",
-        });
-
-      return db.collection("media").doc(metadata.mediaId).update({
-        url,
-        signed_url,
-      });
-    } catch (error) {
-      console.log(error);
     }
   });
 

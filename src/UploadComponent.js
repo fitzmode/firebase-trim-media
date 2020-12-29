@@ -16,7 +16,7 @@ function UploadComponent() {
       const file = e.target.files[0];
       if(!file) return console.log('No file selected')
       const ref = firebase.storage().ref("/processing");
-      const fileRef = ref.child(file.name);
+      const fileRef = ref.child(file.name.replace(/\s/g, ''));
       const upload = await fileRef.put(file, {
         customMetadata: {
           // Associate file with existing document
