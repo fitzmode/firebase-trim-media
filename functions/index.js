@@ -29,86 +29,86 @@ function pspawn(args) {
   });
 }
 
-// exports.trimMedia = functions
-//   .firestore
-//   .document("media/{mediaId}")
-//   .onUpdate(async (change, context) => {
-//     try {
-//       const { mediaId } = context.params;
-//       const db = admin.firestore();
-//       const { url, frames, frame_urls } = change.after.data();
+exports.trimMedia = functions
+  .firestore
+  .document("media/{mediaId}")
+  .onUpdate(async (change, context) => {
+    try {
+      const { mediaId } = context.params;
+      const db = admin.firestore();
+      const { url, frames, frame_urls } = change.after.data();
 
-//       //Safety check for allowed file types
+      //Safety check for allowed file types
 
-//       if (!ALLOWED_EXTENAMES.includes(path.extname(url)))
-//         throw new Error("File type not permitted");
+      if (!ALLOWED_EXTENAMES.includes(path.extname(url)))
+        throw new Error("File type not permitted");
 
-//       // Temporary early return to prevent update loop when frame_urls are updated, depends on database structure.
-//       if (frame_urls) return false;
-//       if (!url) throw new Error("No url provided for media");
-//       if (!frames || !Array.isArray(frames))
-//         throw new Error("No frames values provided for media");
+      // Temporary early return to prevent update loop when frame_urls are updated, depends on database structure.
+      if (frame_urls) return false;
+      if (!url) throw new Error("No url provided for media");
+      if (!frames || !Array.isArray(frames))
+        throw new Error("No frames values provided for media");
 
-//       // Create folder in tmp based on unique mediaId
-//       const workingdir = path.join(tmpDir, mediaId);
-//       await fs.ensureDir(workingdir);
+      // Create folder in tmp based on unique mediaId
+      const workingdir = path.join(tmpDir, mediaId);
+      await fs.ensureDir(workingdir);
 
-//       let command = `-i ${url} `;
-//       const name = path.parse(url).name;
-//       const ext = path.parse(url).ext;
-//       for (let i = 0; i < frames.length; i++) {
-//         const { from, to } = frames[i];
+      let command = `-i ${url} `;
+      const name = path.parse(url).name;
+      const ext = path.parse(url).ext;
+      for (let i = 0; i < frames.length; i++) {
+        const { from, to } = frames[i];
 
-//         if (typeof from !== "number" || typeof to !== "number")
-//           throw new Error("Provided values should be of type number");
-//         // Make sure min comes first;
-//         const min = Math.min(from, to);
-//         const max = Math.max(from, to);
-//         command += ` -ss ${min} -c copy -t ${
-//           max - min
-//         } ${workingdir}/${name}_${i}${ext}`;
-//       }
+        if (typeof from !== "number" || typeof to !== "number")
+          throw new Error("Provided values should be of type number");
+        // Make sure min comes first;
+        const min = Math.min(from, to);
+        const max = Math.max(from, to);
+        command += ` -ss ${min} -c copy -t ${
+          max - min
+        } ${workingdir}/${name}_${i}${ext}`;
+      }
 
-//       if (!command) throw new Error("No trim segments for command");
-//       // Split media with FFMPEG
-//       await pspawn(`${command} -y`.split(" ").filter(Boolean));
+      if (!command) throw new Error("No trim segments for command");
+      // Split media with FFMPEG
+      await pspawn(`${command} -y`.split(" ").filter(Boolean));
 
-//       // Upload
-//       const uploadPromises = frames.map(async (frame, idx) => {
-//         return await storage
-//           .bucket(config.storageBucket)
-//           .upload(`${workingdir}/${name}_${idx}${ext}`, {
-//             //Maybe store by userId ==> media/{uid}/file to prevent name conflict between users
-//             destination: path.join("media", `${name}_${idx}${ext}`),
-//           });
-//       });
+      // Upload
+      const uploadPromises = frames.map(async (frame, idx) => {
+        return await storage
+          .bucket(config.storageBucket)
+          .upload(`${workingdir}/${name}_${idx}${ext}`, {
+            //Maybe store by userId ==> media/{uid}/file to prevent name conflict between users
+            destination: path.join("media", `${name}_${idx}${ext}`),
+          });
+      });
 
-//       const uploads = await Promise.all(uploadPromises);
+      const uploads = await Promise.all(uploadPromises);
 
-//       const urlPromises = uploads.map(
-//         async (upload) =>
-//           await upload[0].getSignedUrl({
-//             expires: "03-03-2041",
-//             action: "read",
-//           })
-//       );
-//       const urls = await Promise.all(urlPromises);
+      const urlPromises = uploads.map(
+        async (upload) =>
+          await upload[0].getSignedUrl({
+            expires: "03-03-2041",
+            action: "read",
+          })
+      );
+      const urls = await Promise.all(urlPromises);
 
-//       // urls is nested Arrays, flatten them
-//       const merged = [].concat.apply([], urls);
-//       // Update db
+      // urls is nested Arrays, flatten them
+      const merged = [].concat.apply([], urls);
+      // Update db
 
-//       await db.collection("media").doc(mediaId).update({
-//         frame_urls: merged,
-//       });
+      await db.collection("media").doc(mediaId).update({
+        frame_urls: merged,
+      });
 
-//       // Delete tmpfiles
-//       return await fs.remove(workingdir);
-//     } catch (error) {
-//       console.error(error);
-//       return false;
-//     }
-//   });
+      // Delete tmpfiles
+      return await fs.remove(workingdir);
+    } catch (error) {
+      console.error(error);
+      return false;
+    }
+  });
 
 // Will update doc and trigger file trimming.
 exports.handleFileUpload = functions.storage
