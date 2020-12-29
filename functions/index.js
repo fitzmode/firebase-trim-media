@@ -10,6 +10,7 @@ const { ALLOWED_EXTENAMES } = require("./consts");
 const { spawn } = require("child_process");
 const tmpDir = os.tmpdir();
 const serviceAccount = require("./service-account.json");
+const { onRequest } = require("firebase-functions/lib/providers/https");
 
 const config = JSON.parse(process.env.FIREBASE_CONFIG);
 config.credential = admin.credential.cert(serviceAccount);
@@ -17,7 +18,8 @@ admin.initializeApp(config);
 
 function pspawn(args) {
   return new Promise((resolve, reject) => {
-    const process = spawn(ffmpeg_static.path, args);
+    console.log(args, "Args")
+    const process = spawn(ffmpeg_static, args);
     process.on("exit", function (code) {
       resolve("Complete");
     });
@@ -139,8 +141,8 @@ exports.handleFileUpload = functions.storage
     } catch (error) {
       console.log(error);
     }
-    return false;
   });
+
 
 
 
@@ -150,8 +152,10 @@ exports.handleFileUpload = functions.storage
   .onUpdate(async (change, context) => {
     try {
       const { mediaId } = context.params;
+
       const db = admin.firestore();
       const { url, frames, frame_urls } = change.after.data();
+
 
       //Safety check for allowed file types
 
@@ -169,7 +173,7 @@ exports.handleFileUpload = functions.storage
       await fs.ensureDir(workingdir);
 
       let split_command = `-i ${url} `;
-      let concat_command = `concat:`;
+      let concat_command = `-i concat:`;
       const {name, ext} = path.parse(url);
 
       for (let i = 0; i < frames.length; i++) {
@@ -182,25 +186,24 @@ exports.handleFileUpload = functions.storage
         split_command += ` -ss ${min} -c copy -t ${
           max - min
         } ${workingdir}/${name}_${i}${ext}`;
+      // Remove pipe operator if last file. Not sure if it's at all consequential;
+      concat_command += `${workingdir}/${name}_${i}${ext}${i === frames.length - 1 ? '' :'|'}`
       }
 
-      // Remove pipe operator if last file. Not sure if it's at all consequential;
-      concat_command += `${workingdir}/${name}_${i}${ext} ${i === frames.length - 1 ? '' :'|'}`
 
     
       // Split media with FFMPEG
       await pspawn(`${split_command} -y`.split(" ").filter(Boolean));
 
-      console.log(concat_command, `${concat_command} -y ${workingdir}/concat_${name}${ext}`)
       // Concat media with FFMPEG
       await pspawn(`${concat_command} -y ${workingdir}/concat_${name}${ext}`.split(" ").filter(Boolean))
 
       // Upload
       const upload = await storage
           .bucket(config.storageBucket)
-          .upload(`${workingdir}/${name}_${idx}${ext}`, {
+          .upload(`${workingdir}/concat_${name}${ext}`, {
             //Maybe store by userId ==> media/{uid}/file to prevent name conflict between users
-            destination: path.join("media", `${name}_${idx}${ext}`),
+            destination: path.join("media", `concat_${name}${ext}`),
           });
 
       const [merged_url] = await upload[0].getSignedUrl({
@@ -214,6 +217,7 @@ exports.handleFileUpload = functions.storage
 
       // Delete tmpfiles
       return await fs.remove(workingdir);
+      
     } catch (error) {
       console.error(error);
       return false;
@@ -244,13 +248,12 @@ exports.handleFileUpload = functions.storage
           action: "read",
         });
 
-      db.collection("media").doc(metadata.mediaId).update({
+      return db.collection("media").doc(metadata.mediaId).update({
         url,
         signed_url,
       });
     } catch (error) {
       console.log(error);
     }
-    return false;
   });
 
